@@ -1,0 +1,423 @@
+---
+output: html_document
+error: FALSE
+warning: FALSE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+
+library(ggplot2)
+library(MASS) 
+library(tidyverse)
+library(clusterSim)
+library(cluster)
+library(factoextra)
+library(clValid)
+library(GGally)
+library(kknn)
+library(DT)
+library(formattable)
+library(RColorBrewer)
+```
+
+# Спектральная кластеризация 
+
+### Качество кластеризации 
+
+#### **Davies-Bouldin Index**
+
+```{r pressure_1, echo=FALSE, out.width = '100%'}
+knitr::include_graphics("photo_2024-12-05_10-27-49.jpg")
+```
+
+Он измеряет степень перекрытия между кластерами. Чем ниже значение DBI, тем лучше кластеризация.
+
+#### **Silhouette**
+
+```{r pressure_2, echo=FALSE, out.width = '100%'}
+knitr::include_graphics("photo_2024-12-05_10-27-19.jpg")
+```
+
+#### **Dunn Index**
+
+```{r pressure_3, echo=FALSE, out.width = '100%'}
+knitr::include_graphics("photo_2024-12-05_10-36-36.jpg")
+```
+
+Более высокое значение указывает на лучшую кластеризацию. Он представляет собой отношение минимального межкластерного расстояния к максимальному внутрикластерному расстоянию.
+
+## Пример 1 
+
+```{r}
+head_points <- function(center_x, center_y, radius_x, radius_y, n = 300) { 
+  t <- seq(0, 2 * pi, length.out = n)
+  data.frame(
+    x = center_x + radius_x * cos(t), 
+    y = center_y + radius_y * sin(t)
+  )
+}
+
+ear_points <- function(center_x, center_y, radius, n = 100){
+  t <- seq(0, pi, length.out = n)
+  data.frame(
+    x = center_x + radius * cos(t) * (1 + 0.2 * sin(3*t)),   
+    y = center_y + radius * sin(t) * (1+0.2*cos(3*t))
+  )
+}
+
+left_ear <- ear_points(-0.5, 0.8, 0.3)
+right_ear <- ear_points(0.5, 0.8, 0.3)
+
+
+filled_eye_points <- function(center_x, center_y, radius, n = 500) {  
+  angles <- runif(n, 0, 2 * pi)
+  radii <- sqrt(runif(n)) * radius
+  data.frame(
+    x = center_x + radii * cos(angles),
+    y = center_y + radii * sin(angles)
+  )
+}
+
+left_eye <- filled_eye_points(-0.3, 0.2, 0.1)
+right_eye <- filled_eye_points(0.3, 0.2, 0.1)
+
+
+nose_points <- function(center_x, center_y, width, height, n = 50) {
+  t <- seq(0, pi, length.out = n)
+  data.frame(
+    x = center_x + width / 2 * cos(t),
+    y = center_y - height * sin(t)
+  )
+}
+nose <- nose_points(0, -0.2, 0.2, 0.2)
+
+
+whisker_points <- function(x_start, y_start, x_end, y_end, n = 20) { 
+  data.frame(
+    x = seq(x_start, x_end, length.out = n),
+    y = seq(y_start, y_end, length.out = n)
+  )
+}
+
+left_whiskers <- rbind(
+  whisker_points(-0.2, -0.25, -0.6, -0.3),
+  whisker_points(-0.2, -0.25, -0.6, -0.15),
+  whisker_points(-0.2, -0.25, -0.6, -0.4)
+)
+
+right_whiskers <- rbind(
+  whisker_points(0.2, -0.25, 0.6, -0.3),
+  whisker_points(0.2, -0.25, 0.6, -0.15),
+  whisker_points(0.2, -0.25, 0.6, -0.4)
+)
+
+
+cat_points <- rbind(
+  head_points(0, 0, 1, 0.8),
+  left_ear,
+  right_ear,
+  left_eye,
+  right_eye,
+  nose,
+  left_whiskers,
+  right_whiskers
+)
+```
+
+```{r}
+set.seed(225)
+data <- as.matrix(cat_points[, c("x", "y")])  
+spec_result <- specClust(data, centers = 8, method = "none")
+
+cat_points$cluster <- as.factor(spec_result$cluster)
+
+ggplot(cat_points, aes(x = x, y = y, color = cluster)) +
+  geom_point(size = 1) +
+  coord_equal() +
+ scale_color_brewer(palette = "Set2") +  
+  theme_bw() +
+  theme(legend.position = "right") 
+
+```
+
+
+**Качество кластеризации**
+
+```{r}
+clusters <- as.numeric(as.character(cat_points$cluster))
+
+db_index <- index.DB(cat_points[-3], clusters)
+dunn_index <- dunn(dist(cat_points[-3]), clusters)
+sil <- silhouette(clusters, dist(cat_points[-3]))
+
+results <- data.frame(
+   Davies_Bouldin = db_index$DB,
+  Silhouette_Avg = mean(sil[, 3]),
+  Dunn = dunn_index
+  )
+
+datatable(results)
+```
+
+
+
+
+
+## Пример 2
+
+```{r}
+set.seed(123)  
+
+n_points <- 500  # Количество точек в каждом кластере
+mu1 <- c(2, 2, 2)  
+mu2 <- c(-2, -2, -2)  
+mu3 <- c(5, -5, 0)  
+sigma <- diag(3)  
+
+cluster1 <- mvrnorm(n_points, mu1, sigma)
+cluster2 <- mvrnorm(n_points, mu2, sigma)
+cluster3 <- mvrnorm(n_points, mu3, sigma)
+
+
+noise_points <- 50
+noise <- matrix(runif(noise_points * 3, min = -7, max = 8), ncol = 3)
+
+data_n <- rbind(cluster1, cluster2, cluster3, noise)
+```
+
+
+```{r}
+pca_result <- prcomp(data_n)
+
+pca_data <- pca_result$x[, 1:2]  
+
+set.seed(225)
+spec_result <- specClust(data_n, method = "none", centers = 3) 
+pca_data <- as.data.frame(pca_data)
+pca_data$cluster <- spec_result$cluster
+
+ggplot(pca_data, aes(x = PC1, y = PC2, color = as.factor(cluster))) +
+  geom_point() +
+  labs(x = "PC1",
+       y = "PC2",
+       color = "cluster") +
+  theme_bw() +
+  scale_color_viridis_d() 
+```
+
+```{r chunk_name_clust, fig.width=20, fig.height=13}
+clusters <- spec_result$cluster
+
+data_clust_with_clusters <- as.data.frame(data_n) %>%
+  mutate(cluster = as.factor(clusters))
+
+ggpairs(data_clust_with_clusters, aes(color = cluster, alpha = 0.7))
+```
+
+**Качество кластеризации**
+
+```{r}
+
+db_index <- index.DB(data_n, clusters)
+dunn_index <- dunn(dist(data_n), clusters)
+sil <- silhouette(clusters, dist(data_n))
+
+results <- data.frame(
+   Davies_Bouldin = db_index$DB,
+  Silhouette_Avg = mean(sil[, 3]),
+  Dunn = dunn_index)
+
+datatable(results)
+```
+
+#### Сравнение метрик для различного типа кластеров
+
+**4 кластера одинаковой формы**
+
+```{r}
+set.seed(123)  
+
+centers_x <- c(80, 380, 80, 380) 
+centers_y <- c(480, 480, 120, 120) 
+sds <- c(30, 30, 30, 30) 
+n_points <- 200       
+
+
+data_x <- numeric(0)
+data_y <- numeric(0)
+true_labels <- numeric(0)
+
+for (i in 1:4) {
+  cluster_x <- rnorm(n_points, mean = centers_x[i], sd = sds[i])
+  cluster_y <- rnorm(n_points, mean = centers_y[i], sd = sds[i])
+  
+  data_x <- c(data_x, cluster_x)
+  data_y <- c(data_y, cluster_y)
+  true_labels <- c(true_labels, rep(i, n_points))
+}
+
+
+data4 <- data.frame(x = data_x, y = data_y)
+
+spec_result_data4 <- specClust(data4, centers = 4,  method = "none")
+
+data4$cluster <- as.factor(spec_result_data4$cluster)
+
+ggplot(data4, aes(x = x, y = y, color = cluster)) +
+  geom_point(size = 1) +
+  coord_equal() +
+ scale_color_brewer(palette = "Set2") +  
+  theme_bw() +
+  theme(legend.position = "right") 
+
+```
+
+**случай с перекрывающимися кластерами**
+
+```{r}
+set.seed(123)
+
+cluster1_x <- runif(200, 2, 14)
+cluster1_y <- runif(200, 18, 28)
+cluster1 <- data.frame(x = cluster1_x, y = cluster1_y)
+
+cluster4_x <- runif(100, 18, 25)
+cluster4_y <- runif(100, 20, 25)
+cluster4 <- data.frame(x = cluster4_x, y = cluster4_y)
+
+cluster5_x <- runif(20, 29, 38)
+cluster5_y <- runif(20, 23, 30)
+cluster5 <- data.frame(x = cluster5_x, y = cluster5_y)
+
+cluster6_x <- runif(150, 29, 38)
+cluster6_y <- runif(150, 0, 10)
+cluster6 <- data.frame(x = cluster6_x, y = cluster6_y)
+
+cluster7_x <- runif(300, 7, 28)
+cluster7_y <- runif(300, 4, 14)
+cluster7 <- data.frame(x = cluster7_x, y = cluster7_y)
+
+cluster8_x <- runif(600, 4, 10)
+cluster8_y <- runif(600, 2, 7)
+cluster8 <- data.frame(x = cluster8_x, y = cluster8_y)
+
+
+data6 <- rbind(cluster1, cluster4, cluster5, cluster6, cluster7, cluster8)
+
+spec_result_data6 <- specClust(data6, centers = 6,  method = "none")
+
+data6$cluster <- as.factor(spec_result_data6$cluster)
+
+ggplot(data6, aes(x = x, y = y, color = cluster)) +
+  geom_point(size = 1) +
+  coord_equal() +
+ scale_color_brewer(palette = "Set2") +  
+  theme_bw() +
+  theme(legend.position = "right") 
+```
+
+
+**4 кластера различной формы** 
+
+```{r}
+set.seed(123)
+
+n_cluster1 <- 200
+mean_cluster1 <- c(5, 5) 
+sigma_cluster1 <- matrix(c(2, 1, 1, 2), nrow = 2) 
+cluster1 <- as.data.frame(mvrnorm(n_cluster1, mean_cluster1, sigma_cluster1))
+colnames(cluster1) <- c("x", "y") 
+
+n_cluster2 <- 200
+radius <- 5
+center_x <- 10
+center_y <- 20
+angle <- seq(0, pi, length.out = n_cluster2) 
+x <- center_x + radius * cos(angle)
+y <- center_y + radius * sin(angle)
+
+cluster2 <- data.frame(x = x, y = y)
+
+
+n_cluster3 <- 200
+x_min <- 15
+x_max <- 25
+y_min <- 2
+y_max <- 15
+
+x <- runif(n_cluster3, min = x_min, max = x_max)
+y <- runif(n_cluster3, min = y_min, max = y_max)
+
+cluster3 <- data.frame(x = x, y = y)
+
+
+n_cluster4 <- 200
+x_start <- 25
+y_start <- 18
+x_end <- 30
+y_end <- 28
+
+x <- seq(x_start, x_end, length.out = n_cluster4) 
+y <- seq(y_start, y_end, length.out = n_cluster4)
+
+x <- x + runif(n_cluster4, -0.5, 0.5) 
+y <- y + runif(n_cluster4, -0.5, 0.5)
+
+cluster4 <- data.frame(x = x, y = y)
+
+
+data4_diff <- rbind(cluster1, cluster2, cluster3, cluster4)
+
+spec_result_data4_diff <- specClust(data4_diff, centers = 4,  method = "none")
+
+data4_diff$cluster <- as.factor(spec_result_data4_diff$cluster)  
+
+ggplot(data4_diff, aes(x = x, y = y, color = cluster)) +
+  geom_point(size = 1) +
+  coord_equal() +
+  scale_color_brewer(palette = "Set2") +  
+  theme_bw() +
+  theme(legend.position = "right")
+```
+
+
+
+```{r}
+calculate_metrics <- function(data, clusters) {
+  dist_matrix <- dist(data)  
+
+  db_index <- index.DB(data, clusters)
+  dunn_index <- dunn(dist_matrix, clusters)
+  sil <- silhouette(clusters, dist_matrix)
+  
+  metrics <- data.frame(
+    Davies_Bouldin = db_index$DB,
+    Silhouette_Avg = mean(sil[, 3]),
+    Dunn = dunn_index
+  )
+  
+  return(metrics)
+}
+
+clusters4 <- as.numeric(as.character(data4$cluster))
+metrics_data4 <- calculate_metrics(data4[-3], clusters4)
+
+clusters4_diff <- as.numeric(as.character(data4_diff$cluster))
+metrics_data4_diff <- calculate_metrics(data4_diff[-3], clusters4_diff)
+
+clusters6 <- as.numeric(as.character(data6$cluster))
+metrics_data6 <- calculate_metrics(data6[-3], clusters6)
+
+
+results_summary <- data.frame(
+  Method = c("data4", "data4_diff", "data6"),
+  Davies_Bouldin = c(metrics_data4$Davies_Bouldin, metrics_data4_diff$Davies_Bouldin, metrics_data6$Davies_Bouldin),
+  Silhouette_Avg = c(metrics_data4$Silhouette_Avg, metrics_data4_diff$Silhouette_Avg,  metrics_data6$Silhouette_Avg),
+  Dunn = c(metrics_data4$Dunn, metrics_data4_diff$Dunn, metrics_data6$Dunn)
+)
+
+datatable(results_summary)
+
+```
+
